@@ -1,0 +1,58 @@
+[build-system]
+requires = [ "setuptools>=61.2" ]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pymmcore-plus-sandbox"
+version = "0"
+description = "Not really sure what this is yet"
+license = {text = "Apache-2.0"}
+authors = [{name = "Gabriel Selzer", email = "gjselzer@wisc.edu"}]
+readme = "README.md"
+keywords = ["micromanager", "pymmcore"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+requires-python = ">=3.8"
+dependencies = [
+    "cmap",
+    "ndv@git+https://github.com/pyapp-kit/ndv.git@b79241c146bcbbb8160925f8cafbe8734ff75cef",
+    "numpy<2",
+    "PyQt6",
+    "pymmcore-plus",
+    "pymmcore-widgets",
+    "vispy",
+    "useq-schema",
+    "zarr",
+]
+
+# extras
+# https://peps.python.org/pep-0621/#dependencies-optional-dependencies
+[project.optional-dependencies]
+dev = ["ipython", "mypy", "pre-commit", "ruff"]
+
+# NB gui-scripts is chosen for 
+[project.gui-scripts]
+sb = "pymmcore_plus_sandbox:launch"
+
+[project.urls]
+homepage = "https://github.com/gselzer/pymmcore-plus-sandbox"
+
+[tool.ruff.lint]
+select = [
+    "E",    # style errors
+    "F",    # flakes
+    "I",    # isort
+    "C4",   # flake8-comprehensions
+    "B",    # flake8-bugbear
+    "A001", # flake8-builtins
+]
