@@ -3,15 +3,10 @@ channels:
   - defaults
   - conda-forge
 dependencies:
-  - cmap
   - python
-  - pyqt
-  - pymmcore-plus
   - pip
-  - vispy
-  - zarr
   # TODO - released version of pymmcore-widgets not new enough - install from GitHub
   - pip:
-    - git+https://github.com/pymmcore-plus/pymmcore-widgets.git@e3de02b0d28a36da43836d39176da960de413e57
+    - "-e ."
 variables:
   MICROMANAGER_PATH: /usr/local/bin/micromanager

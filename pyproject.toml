@@ -1,0 +1,35 @@
+[build-system]
+requires = [ "setuptools>=61.2" ]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pymmcore-plus-sandbox"
+version = "0"
+description = "Not really sure what this is yet"
+license = {text = "Apache-2.0"}
+authors = [{name = "Gabriel Selzer", email = "gjselzer@wisc.edu"}]
+readme = "README.md"
+keywords = ["micromanager", "pymmcore"]
+classifiers = [
+    "Development Status :: 1 - Planning",
+]
+
+# NB: Keep this in sync with environment.yml AND dev-environment.yml!
+requires-python = ">=3.8"
+dependencies = [
+    "cmap",
+    "ndv@git+https://github.com/pyapp-kit/ndv.git@5fefbd196242474c351587ded75aaff32ed8663c",
+    "numpy<2",
+    "PyQt6",
+    "pymmcore-plus",
+    "pymmcore-widgets",
+    "vispy",
+    "useq-schema",
+    "zarr",
+]
+
+[project.gui-scripts]
+sb = "pymmcore_plus_sandbox:launch"
+
+[project.urls]
+homepage = "https://github.com/gselzer/pymmcore-plus-sandbox"
