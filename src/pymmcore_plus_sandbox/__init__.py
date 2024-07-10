@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 import sys
+from typing import TYPE_CHECKING
 
 import numpy as np
 import tensorstore as ts
-from ndv import NDViewer
-from pymmcore import CMMCore
+from ndv import DataWrapper, NDViewer
 from pymmcore_plus import CMMCorePlus, DeviceType
 from pymmcore_plus.mda.handlers import TensorStoreHandler
 from pymmcore_widgets import (
@@ -35,11 +37,14 @@ from useq import MDAEvent, MDASequence
 from pymmcore_plus_sandbox._mda_button_widget import MDAButton
 from pymmcore_plus_sandbox._stage_widget import StageButton
 
+if TYPE_CHECKING:
+    from typing import Any, Hashable, Mapping
+
 
 class SnapLiveToolBar(QToolBar):
     """Tab exposing widgets for data display."""
 
-    def __init__(self, mmc: CMMCore | None = None) -> None:
+    def __init__(self, mmc: CMMCorePlus | None = None) -> None:
         super().__init__()
         self._mmc = mmc if mmc is not None else CMMCorePlus.instance()
         self._create_gui()
@@ -102,7 +107,7 @@ class StageControlToolBar(QToolBar):
 class ShuttersToolBar(QToolBar):
     """Tab exposing widgets for shutter control."""
 
-    def __init__(self, mmc: CMMCore | None = None) -> None:
+    def __init__(self, mmc: CMMCorePlus | None = None) -> None:
         super().__init__()
         self.mmc = mmc if mmc is not None else CMMCorePlus.instance()
         self._create_gui()
@@ -139,7 +144,7 @@ class CentralWidget(QWidget):
     """Contains widgets shown in the center of the application."""
 
     def __init__(
-        self, parent: QWidget | None = None, mmc: CMMCore | None = None
+        self, parent: QWidget | None = None, mmc: CMMCorePlus | None = None
     ) -> None:
         super().__init__(parent=parent)
         self._layout = QHBoxLayout()
@@ -162,31 +167,52 @@ class Viewfinder(NDViewer):
         self._btns.insertWidget(0, SnapButton(mmcore=self._mmc))
         self._btns.insertWidget(1, LiveButton(mmcore=self._mmc))
 
-        # Create backing data store
-        w = self._mmc.getProperty("Camera", "OnCameraCCDXSize")
-        h = self._mmc.getProperty("Camera", "OnCameraCCDYSize")
-        shape = (int(w), int(h))
-        self.ts_array = ts.open(
-            {"driver": "zarr", "kvstore": {"driver": "memory"}},
-            create=True,
-            shape=shape,
-            dtype=self._data_type(),
-        ).result()
-        super().set_data(self.ts_array)
+        # Create initial buffer
+        self.ts_array = None
+        self.ts_shape = (0, 0)
+        self.bytes_per_pixel = 0
+        self.update_datastore()
 
-    def set_data(self, data: np.ndarray) -> None:
-        self.ts_array[:] = data
-        self.set_current_index({})
+    def update_datastore(self):
+        if (
+            self.ts_array is None
+            or self.ts_shape[0] != self._mmc.getImageHeight()
+            or self.ts_shape[1] != self._mmc.getImageWidth()
+            or self.bytes_per_pixel != self._mmc.getBytesPerPixel()
+        ):
+            self.ts_shape = (self._mmc.getImageHeight(), self._mmc.getImageWidth())
+            self.bytes_per_pixel = self._mmc.getBytesPerPixel()
+            self.ts_array = ts.open(
+                {"driver": "zarr", "kvstore": {"driver": "memory"}},
+                create=True,
+                shape=self.ts_shape,
+                dtype=self._data_type(),
+            ).result()
+            super().set_data(self.ts_array)
+
+    def set_data(
+        self,
+        data: DataWrapper[Any] | Any,
+        *,
+        initial_index: Mapping[Hashable, int | slice] | None = {},
+    ) -> None:
+        # def set_data(self, data, *, initial_index=None) -> None:
+        if initial_index is None:
+            initial_index = {}
+        self.update_datastore()
+        if self.ts_array:
+            self.ts_array[:] = data
+        self.set_current_index(initial_index)
 
     # -- HELPERS -- #
 
     def _data_type(self):
-        px_type = self._mmc.getProperty("Camera", "PixelType")
-        if px_type == "8bit":
+        px_type = self._mmc.getBytesPerPixel()
+        if px_type == 1:
             return ts.uint8
-        elif px_type == "16bit":
+        elif px_type == 2:
             return ts.uint16
-        elif px_type == "32bit":
+        elif px_type == 4:
             return ts.uint32
         else:
             raise Exception(f"Unsupported Pixel Type: {px_type}")
@@ -307,6 +333,7 @@ class APP(QMainWindow):
         super().closeEvent(event)
         QApplication.quit()
 
+    @ensure_main_thread
     def _set_up_viewfinder(self) -> Viewfinder:
         # Instantiate if not yet created
         if self.viewfinder is None:
@@ -320,19 +347,18 @@ class APP(QMainWindow):
 
     # -- SNAP VIEWER -- #
 
-    @ensure_main_thread  # type: ignore [misc]
     def _handle_snap(self):
         if self._mmc.mda.is_running():
             # This signal is emitted during MDAs as well - we want to ignore those.
             return
-        viewfinder = self._set_up_viewfinder()
+        viewfinder = self._set_up_viewfinder().result()
         viewfinder.set_data(self._mmc.getImage().copy())
         # viewfinder.set_current_index({})
 
     # -- LIVE VIEWER -- #
 
     def _start_live_viewer(self):
-        viewfinder = self._set_up_viewfinder()
+        viewfinder = self._set_up_viewfinder().result()
         viewfinder.live_view = True
 
         # Start timer to update live viewer
