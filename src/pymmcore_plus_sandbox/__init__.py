@@ -150,6 +150,48 @@ class CentralWidget(QWidget):
         self.setLayout(self._layout)
 
 
+class Viewfinder(NDViewer):
+    """An NDViewer subclass designed for expedient Snap&Live views."""
+
+    def __init__(self, mmc: CMMCorePlus | None = None) -> None:
+        super().__init__()
+        self.setWindowTitle("Viewfinder")
+        self.live_view: bool = False
+        self._mmc = mmc if mmc is not None else CMMCorePlus.instance()
+
+        self._btns.insertWidget(0, SnapButton(mmcore=self._mmc))
+        self._btns.insertWidget(1, LiveButton(mmcore=self._mmc))
+
+        # Create backing data store
+        w = self._mmc.getProperty("Camera", "OnCameraCCDXSize")
+        h = self._mmc.getProperty("Camera", "OnCameraCCDYSize")
+        shape = (int(w), int(h))
+        self.ts_array = ts.open(
+            {"driver": "zarr", "kvstore": {"driver": "memory"}},
+            create=True,
+            shape=shape,
+            dtype=self._data_type(),
+        ).result()
+        super().set_data(self.ts_array)
+
+    def set_data(self, data: np.ndarray) -> None:
+        self.ts_array[:] = data
+        self.set_current_index({})
+
+    # -- HELPERS -- #
+
+    def _data_type(self):
+        px_type = self._mmc.getProperty("Camera", "PixelType")
+        if px_type == "8bit":
+            return ts.uint8
+        elif px_type == "16bit":
+            return ts.uint16
+        elif px_type == "32bit":
+            return ts.uint32
+        else:
+            raise Exception(f"Unsupported Pixel Type: {px_type}")
+
+
 class APP(QMainWindow):
     """Create a QToolBar for the Main Window."""
 
@@ -157,7 +199,8 @@ class APP(QMainWindow):
         super().__init__()
         self._mmc = CMMCorePlus.instance() if mmc is None else mmc
         self.setWindowTitle("PyMMCore Plus Sandbox")
-        self.windows: list[NDViewer] = []
+        self.viewfinder: Viewfinder | None = None
+        self.mdas: list[NDViewer] = []
         self.live_viewer = None
         self._live_timer_id: int | None = None
 
@@ -178,7 +221,7 @@ class APP(QMainWindow):
                 self.addToolBarBreak(QtCore.Qt.ToolBarArea.TopToolBarArea)
 
         # Snap signals
-        self._mmc.events.imageSnapped.connect(self._new_snap_viewer)
+        self._mmc.events.imageSnapped.connect(self._handle_snap)
 
         self.setCentralWidget(CentralWidget(self, self._mmc))
 
@@ -264,40 +307,33 @@ class APP(QMainWindow):
         super().closeEvent(event)
         QApplication.quit()
 
+    def _set_up_viewfinder(self) -> Viewfinder:
+        # Instantiate if not yet created
+        if self.viewfinder is None:
+            self.viewfinder = Viewfinder(self._mmc)
+        # Make viewfinder visible
+        self.viewfinder.show()
+        # Bring viewfinder to the top
+        self.viewfinder.raise_()
+        # Return viewfinder (for convenience)
+        return self.viewfinder
+
     # -- SNAP VIEWER -- #
 
-    def _new_snap_viewer(self):
+    @ensure_main_thread  # type: ignore [misc]
+    def _handle_snap(self):
         if self._mmc.mda.is_running():
             # This signal is emitted during MDAs as well - we want to ignore those.
             return
-        new_snap_viewer = NDViewer()
-        data = self._mmc.getImage().copy()
-        new_snap_viewer.set_data(data)
-        new_snap_viewer.show()
-        # Append viewer to avoid GC
-        self.windows.append(new_snap_viewer)
-        self.windows.append(data)
+        viewfinder = self._set_up_viewfinder()
+        viewfinder.set_data(self._mmc.getImage().copy())
+        # viewfinder.set_current_index({})
 
     # -- LIVE VIEWER -- #
 
     def _start_live_viewer(self):
-        # Close old live viewer
-        if self.live_viewer:
-            self.live_viewer.close()
-            self.live_viewer = None
-
-        # Start new live viewer
-        w = self._mmc.getProperty("Camera", "OnCameraCCDXSize")
-        h = self._mmc.getProperty("Camera", "OnCameraCCDYSize")
-        shape = (int(w), int(h))
-        self.ts_array = ts.open(
-            {"driver": "zarr", "kvstore": {"driver": "memory"}},
-            create=True,
-            shape=shape,
-            dtype=self._data_type(),
-        ).result()
-        self.live_viewer = NDViewer(self.ts_array)
-        self.live_viewer.show()
+        viewfinder = self._set_up_viewfinder()
+        viewfinder.live_view = True
 
         # Start timer to update live viewer
         interval = int(self._mmc.getExposure())
@@ -307,24 +343,20 @@ class APP(QMainWindow):
 
     def _stop_live_viewer(self):
         # Pause live viewer, but leave it open.
-        if self.live_viewer:
+        if self.viewfinder.live_view:
+            self.viewfinder.live_view = False
             self.killTimer(self._live_timer_id)
             self._live_timer_id = None
 
+    @ensure_main_thread  # type: ignore [misc]
     def _update_viewer(self, data: np.ndarray | None = None) -> None:
         """Update viewer with the latest image from the circular buffer."""
         if data is None:
             if self._mmc.getRemainingImageCount() == 0:
                 return
             try:
-                # TODO - is there any way to read the bytes directly into this buffer?
-                # TODO Does it help us to do the write asyncronously, and just call
-                # setIndex later?
-                self.ts_array[:] = self._mmc.getLastImage()
-                # This call is important, telling the StackViewer to redraw the current
-                # data buffer.
-                if self.live_viewer:
-                    self.live_viewer.set_current_index({})
+                if self.viewfinder:
+                    self.viewfinder.set_data(self._mmc.getLastImage().copy())
             except (RuntimeError, IndexError):
                 # circular buffer empty
                 return
@@ -336,6 +368,7 @@ class APP(QMainWindow):
         # Handle the timer event by updating the viewer (on gui thread)
         self._update_viewer()
 
+    @ensure_main_thread  # type: ignore [misc]
     def _on_mda_frame(self, image: np.ndarray, event: MDAEvent) -> None:
         """Called on the `frameReady` event from the core."""
         self.mda_data.frameReady(image, event, {})
@@ -363,19 +396,6 @@ class APP(QMainWindow):
     def _on_mda_finished(self, sequence: MDASequence) -> None:
         # TODO consider necessary cleanup steps
         pass
-
-    # -- HELPERS -- #
-
-    def _data_type(self):
-        px_type = self._mmc.getProperty("Camera", "PixelType")
-        if px_type == "8bit":
-            return ts.uint8
-        elif px_type == "16bit":
-            return ts.uint16
-        elif px_type == "32bit":
-            return ts.uint32
-        else:
-            raise Exception(f"Unsupported Pixel Type: {px_type}")
 
 
 def launch():
