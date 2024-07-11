@@ -37,6 +37,7 @@ from useq import MDAEvent, MDASequence
 
 from pymmcore_plus_sandbox._mda_button_widget import MDAButton
 from pymmcore_plus_sandbox._stage_widget import StageButton
+from pymmcore_plus_sandbox._utils import ErrorMessageBox
 
 if TYPE_CHECKING:
     from typing import Any, Hashable, Mapping
@@ -106,16 +107,20 @@ class StageControlToolBar(QToolBar):
 
 
 class ShuttersToolBar(QToolBar):
-    """Tab exposing widgets for shutter control."""
+    """
+    Tab exposing widgets for shutter control.
+
+    Code adapted from:
+    https://github.com/pymmcore-plus/pymmcore-widgets/blob/370dfcd5b73de95640fb0cc8aea79ec7f03adfd0/examples/shutters_widget.py#L1
+    """
 
     def __init__(self, mmc: CMMCorePlus | None = None) -> None:
         super().__init__()
         self.mmc = mmc if mmc is not None else CMMCorePlus.instance()
-        self._create_gui()
+        self.mmc.events.systemConfigurationLoaded.connect(self._refresh_toolbar)
 
-    def _create_gui(self) -> None:
-        self.snap_live_tab = QGroupBox()
-        self.snap_live_tab.setSizePolicy(
+        self.shutter_tab = QGroupBox()
+        self.shutter_tab.setSizePolicy(
             QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed
         )
         self.snap_live_tab_layout = QGridLayout()
@@ -123,7 +128,20 @@ class ShuttersToolBar(QToolBar):
         self.btn_wdg = QWidget()
         self.btn_wdg.setMaximumHeight(65)
         self.btn_wdg_layout = QHBoxLayout()
+        self.btn_wdg.setLayout(self.btn_wdg_layout)
 
+        self.snap_live_tab_layout.addWidget(self.btn_wdg, 1, 0, 1, 2)
+        self.shutter_tab.setLayout(self.snap_live_tab_layout)
+
+        self.addWidget(self.shutter_tab)
+
+    def _refresh_toolbar(self) -> None:
+        """Called to refresh the tab with current shutters."""
+        # Remove old shutters
+        for i in reversed(range(self.btn_wdg_layout.count())):
+            self.btn_wdg_layout.itemAt(i).widget().deleteLater()
+
+        # Add new shutters
         shutter_dev_list = list(self.mmc.getLoadedDevicesOfType(DeviceType.Shutter))
         for idx, shutter_dev in enumerate(shutter_dev_list):
             # bool to display the autoshutter checkbox only with the last shutter
@@ -132,13 +150,6 @@ class ShuttersToolBar(QToolBar):
             shutter.button_text_open = shutter_dev
             shutter.button_text_closed = shutter_dev
             self.btn_wdg_layout.addWidget(shutter)
-
-        self.btn_wdg.setLayout(self.btn_wdg_layout)
-
-        self.snap_live_tab_layout.addWidget(self.btn_wdg, 1, 0, 1, 2)
-        self.snap_live_tab.setLayout(self.snap_live_tab_layout)
-
-        self.addWidget(self.snap_live_tab)
 
 
 class CentralWidget(QWidget):
@@ -313,7 +324,15 @@ class APP(QMainWindow):
         )
         if filename:
             self._mmc.unloadAllDevices()
-            self._mmc.loadSystemConfiguration(filename)
+            try:
+                self._mmc.loadSystemConfiguration(filename)
+            except Exception as e:
+                ErrorMessageBox(
+                    "Could not load configuration due to the following error. "
+                    "Please file an issue at "
+                    "https://github.com/gselzer/pymmcore-plus-sandbox",
+                    e.args[0],
+                ).exec()
 
     def _save_hw_config(self) -> None:
         """Open file dialog to select a config file."""
@@ -431,12 +450,12 @@ class APP(QMainWindow):
 
 def launch():
     """Launches the GUI and blocks."""
-    mmcore = CMMCorePlus.instance()
-    mmcore.loadSystemConfiguration("./MMConfig_demo.cfg")
-
     qapp = QApplication(sys.argv)
     w = APP()
     w.show()
+
+    mmcore = CMMCorePlus.instance()
+    mmcore.loadSystemConfiguration("./MMConfig_demo.cfg")
 
     qapp.exec()
 
