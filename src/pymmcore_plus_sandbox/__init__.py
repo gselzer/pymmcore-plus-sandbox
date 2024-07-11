@@ -35,6 +35,7 @@ from qtpy.QtWidgets import (
 from superqt.utils import ensure_main_thread
 from useq import MDAEvent, MDASequence
 
+from pymmcore_plus_sandbox._console_widget import QtConsole
 from pymmcore_plus_sandbox._mda_button_widget import MDAButton
 from pymmcore_plus_sandbox._stage_widget import StageButton
 from pymmcore_plus_sandbox._utils import ErrorMessageBox, _data_type
@@ -183,7 +184,6 @@ class Viewfinder(NDViewer):
         self.ts_array = None
         self.ts_shape = (0, 0)
         self.bytes_per_pixel = 0
-        self.update_datastore()
 
     def update_datastore(self):
         if (
@@ -226,7 +226,7 @@ class APP(QMainWindow):
         super().__init__()
         self._mmc = CMMCorePlus.instance() if mmc is None else mmc
         self.setWindowTitle("PyMMCore Plus Sandbox")
-        self.viewfinder: Viewfinder | None = None
+        self.viewfinder = Viewfinder(self._mmc)
         self.current_mda: NDViewer | None = None
         self.mdas: list[NDViewer] = []
         self._live_timer_id: int | None = None
@@ -294,6 +294,27 @@ class APP(QMainWindow):
         self.deviceMenu.addSeparator()
         self.deviceMenu.addAction(self.pixelAction)
 
+        self.toolsMenu = cast(QMenu, bar.addMenu("Tools"))
+
+        self.console: QtConsole | None = None
+        self.consoleAction = QAction("Console", self)
+        self.consoleAction.triggered.connect(self._launch_console)
+
+        self.toolsMenu.addAction(self.consoleAction)
+
+    def _launch_console(self):
+        if self.console is None:
+            # All values in the dictionary below can be accessed from the console using
+            # the associated string key
+            user_vars = {
+                "mmc": self._mmc,
+                "viewfinder": self.viewfinder,
+                "mdas": self.mdas,
+            }
+            self.console = QtConsole(user_vars)
+        self.console.show()
+        self.console.raise_()
+
     def _show_property_browser(self) -> None:
         if self.property_browser is None:
             self.property_browser = PropertyBrowser(parent=None, mmcore=self._mmc)
@@ -344,11 +365,7 @@ class APP(QMainWindow):
         super().closeEvent(event)
         QApplication.quit()
 
-    @ensure_main_thread
     def _set_up_viewfinder(self) -> Viewfinder:
-        # Instantiate if not yet created
-        if self.viewfinder is None:
-            self.viewfinder = Viewfinder(self._mmc)
         # Make viewfinder visible
         self.viewfinder.show()
         # Bring viewfinder to the top
@@ -362,14 +379,14 @@ class APP(QMainWindow):
         if self._mmc.mda.is_running():
             # This signal is emitted during MDAs as well - we want to ignore those.
             return
-        viewfinder = self._set_up_viewfinder().result()
+        viewfinder = self._set_up_viewfinder()
         viewfinder.set_data(self._mmc.getImage().copy())
         # viewfinder.set_current_index({})
 
     # -- LIVE VIEWER -- #
 
     def _start_live_viewer(self):
-        viewfinder = self._set_up_viewfinder().result()
+        viewfinder = self._set_up_viewfinder()
         viewfinder.live_view = True
 
         # Start timer to update live viewer
@@ -428,11 +445,11 @@ class APP(QMainWindow):
         )
         self.current_mda = NDViewer()
         self.current_mda.show()
+        self.mdas.append(self.current_mda)
 
     def _on_mda_finished(self, sequence: MDASequence) -> None:
-        # Retain references to old MDA viewer
-        if self.current_mda is not None:
-            self.mdas.append(self.current_mda)
+        # Nothing to do...yet
+        pass
 
 
 def launch():
