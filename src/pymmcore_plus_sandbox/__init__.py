@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sys
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import tensorstore as ts
@@ -27,6 +27,7 @@ from qtpy.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QMainWindow,
+    QMenu,
     QSizePolicy,
     QToolBar,
     QWidget,
@@ -226,8 +227,8 @@ class APP(QMainWindow):
         self._mmc = CMMCorePlus.instance() if mmc is None else mmc
         self.setWindowTitle("PyMMCore Plus Sandbox")
         self.viewfinder: Viewfinder | None = None
+        self.current_mda: NDViewer | None = None
         self.mdas: list[NDViewer] = []
-        self.live_viewer = None
         self._live_timer_id: int | None = None
 
         # Menus
@@ -262,8 +263,10 @@ class APP(QMainWindow):
         self._mmc.mda.events.sequenceStarted.connect(self._on_mda_started)
         self._mmc.mda.events.sequenceFinished.connect(self._on_mda_finished)
 
-    def _create_menus(self):
-        self.deviceMenu = self.menuBar().addMenu("Device")
+    def _create_menus(self) -> None:
+        if (bar := self.menuBar()) is None:
+            return
+        self.deviceMenu = cast(QMenu, bar.addMenu("Device"))
 
         self.property_browser: PropertyBrowser | None = None
         self.browseAction = QAction("Device Property Browser", self)
@@ -398,9 +401,10 @@ class APP(QMainWindow):
     def _on_mda_frame(self, image: np.ndarray, event: MDAEvent) -> None:
         """Called on the `frameReady` event from the core."""
         self.mda_data.frameReady(image, event, {})
-        if not hasattr(self.mda_viewer, "_data_wrapper"):
-            self.mda_viewer.set_data(self.mda_data.store)
-        self.mda_viewer.set_current_index(event.index)
+        current_mda = cast(NDViewer, self.current_mda)
+        if not hasattr(current_mda, "_data_wrapper"):
+            current_mda.set_data(self.mda_data.store)
+        current_mda.set_current_index(event.index)
 
     @ensure_main_thread  # type: ignore [misc]
     def _on_mda_started(self, sequence: MDASequence) -> None:
@@ -416,12 +420,13 @@ class APP(QMainWindow):
                 "dtype": "uint16"  # TODO
             },
         )
-        self.mda_viewer = NDViewer()
-        self.mda_viewer.show()
+        self.current_mda = NDViewer()
+        self.current_mda.show()
 
     def _on_mda_finished(self, sequence: MDASequence) -> None:
-        # TODO consider necessary cleanup steps
-        pass
+        # Retain references to old MDA viewer
+        if self.current_mda is not None:
+            self.mdas.append(self.current_mda)
 
 
 def launch():
