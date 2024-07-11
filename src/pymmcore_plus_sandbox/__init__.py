@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 import sys
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import tensorstore as ts
-from ndv import NDViewer
-from pymmcore import CMMCore
+from ndv import DataWrapper, NDViewer
 from pymmcore_plus import CMMCorePlus, DeviceType
 from pymmcore_plus.mda.handlers import TensorStoreHandler
 from pymmcore_widgets import (
@@ -25,6 +27,7 @@ from qtpy.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QMainWindow,
+    QMenu,
     QSizePolicy,
     QToolBar,
     QWidget,
@@ -35,11 +38,14 @@ from useq import MDAEvent, MDASequence
 from pymmcore_plus_sandbox._mda_button_widget import MDAButton
 from pymmcore_plus_sandbox._stage_widget import StageButton
 
+if TYPE_CHECKING:
+    from typing import Any, Hashable, Mapping
+
 
 class SnapLiveToolBar(QToolBar):
     """Tab exposing widgets for data display."""
 
-    def __init__(self, mmc: CMMCore | None = None) -> None:
+    def __init__(self, mmc: CMMCorePlus | None = None) -> None:
         super().__init__()
         self._mmc = mmc if mmc is not None else CMMCorePlus.instance()
         self._create_gui()
@@ -102,7 +108,7 @@ class StageControlToolBar(QToolBar):
 class ShuttersToolBar(QToolBar):
     """Tab exposing widgets for shutter control."""
 
-    def __init__(self, mmc: CMMCore | None = None) -> None:
+    def __init__(self, mmc: CMMCorePlus | None = None) -> None:
         super().__init__()
         self.mmc = mmc if mmc is not None else CMMCorePlus.instance()
         self._create_gui()
@@ -139,7 +145,7 @@ class CentralWidget(QWidget):
     """Contains widgets shown in the center of the application."""
 
     def __init__(
-        self, parent: QWidget | None = None, mmc: CMMCore | None = None
+        self, parent: QWidget | None = None, mmc: CMMCorePlus | None = None
     ) -> None:
         super().__init__(parent=parent)
         self._layout = QHBoxLayout()
@@ -150,6 +156,69 @@ class CentralWidget(QWidget):
         self.setLayout(self._layout)
 
 
+class Viewfinder(NDViewer):
+    """An NDViewer subclass designed for expedient Snap&Live views."""
+
+    def __init__(self, mmc: CMMCorePlus | None = None) -> None:
+        super().__init__()
+        self.setWindowTitle("Viewfinder")
+        self.live_view: bool = False
+        self._mmc = mmc if mmc is not None else CMMCorePlus.instance()
+
+        self._btns.insertWidget(0, SnapButton(mmcore=self._mmc))
+        self._btns.insertWidget(1, LiveButton(mmcore=self._mmc))
+
+        # Create initial buffer
+        self.ts_array = None
+        self.ts_shape = (0, 0)
+        self.bytes_per_pixel = 0
+        self.update_datastore()
+
+    def update_datastore(self):
+        if (
+            self.ts_array is None
+            or self.ts_shape[0] != self._mmc.getImageHeight()
+            or self.ts_shape[1] != self._mmc.getImageWidth()
+            or self.bytes_per_pixel != self._mmc.getBytesPerPixel()
+        ):
+            self.ts_shape = (self._mmc.getImageHeight(), self._mmc.getImageWidth())
+            self.bytes_per_pixel = self._mmc.getBytesPerPixel()
+            self.ts_array = ts.open(
+                {"driver": "zarr", "kvstore": {"driver": "memory"}},
+                create=True,
+                shape=self.ts_shape,
+                dtype=self._data_type(),
+            ).result()
+            super().set_data(self.ts_array)
+
+    def set_data(
+        self,
+        data: DataWrapper[Any] | Any,
+        *,
+        initial_index: Mapping[Hashable, int | slice] | None = {},
+    ) -> None:
+        # def set_data(self, data, *, initial_index=None) -> None:
+        if initial_index is None:
+            initial_index = {}
+        self.update_datastore()
+        if self.ts_array:
+            self.ts_array[:] = data
+        self.set_current_index(initial_index)
+
+    # -- HELPERS -- #
+
+    def _data_type(self):
+        px_type = self._mmc.getBytesPerPixel()
+        if px_type == 1:
+            return ts.uint8
+        elif px_type == 2:
+            return ts.uint16
+        elif px_type == 4:
+            return ts.uint32
+        else:
+            raise Exception(f"Unsupported Pixel Type: {px_type}")
+
+
 class APP(QMainWindow):
     """Create a QToolBar for the Main Window."""
 
@@ -157,8 +226,9 @@ class APP(QMainWindow):
         super().__init__()
         self._mmc = CMMCorePlus.instance() if mmc is None else mmc
         self.setWindowTitle("PyMMCore Plus Sandbox")
-        self.windows: list[NDViewer] = []
-        self.live_viewer = None
+        self.viewfinder: Viewfinder | None = None
+        self.current_mda: NDViewer | None = None
+        self.mdas: list[NDViewer] = []
         self._live_timer_id: int | None = None
 
         # Menus
@@ -178,7 +248,7 @@ class APP(QMainWindow):
                 self.addToolBarBreak(QtCore.Qt.ToolBarArea.TopToolBarArea)
 
         # Snap signals
-        self._mmc.events.imageSnapped.connect(self._new_snap_viewer)
+        self._mmc.events.imageSnapped.connect(self._handle_snap)
 
         self.setCentralWidget(CentralWidget(self, self._mmc))
 
@@ -193,8 +263,10 @@ class APP(QMainWindow):
         self._mmc.mda.events.sequenceStarted.connect(self._on_mda_started)
         self._mmc.mda.events.sequenceFinished.connect(self._on_mda_finished)
 
-    def _create_menus(self):
-        self.deviceMenu = self.menuBar().addMenu("Device")
+    def _create_menus(self) -> None:
+        if (bar := self.menuBar()) is None:
+            return
+        self.deviceMenu = cast(QMenu, bar.addMenu("Device"))
 
         self.property_browser: PropertyBrowser | None = None
         self.browseAction = QAction("Device Property Browser", self)
@@ -264,40 +336,33 @@ class APP(QMainWindow):
         super().closeEvent(event)
         QApplication.quit()
 
+    @ensure_main_thread
+    def _set_up_viewfinder(self) -> Viewfinder:
+        # Instantiate if not yet created
+        if self.viewfinder is None:
+            self.viewfinder = Viewfinder(self._mmc)
+        # Make viewfinder visible
+        self.viewfinder.show()
+        # Bring viewfinder to the top
+        self.viewfinder.raise_()
+        # Return viewfinder (for convenience)
+        return self.viewfinder
+
     # -- SNAP VIEWER -- #
 
-    def _new_snap_viewer(self):
+    def _handle_snap(self):
         if self._mmc.mda.is_running():
             # This signal is emitted during MDAs as well - we want to ignore those.
             return
-        new_snap_viewer = NDViewer()
-        data = self._mmc.getImage().copy()
-        new_snap_viewer.set_data(data)
-        new_snap_viewer.show()
-        # Append viewer to avoid GC
-        self.windows.append(new_snap_viewer)
-        self.windows.append(data)
+        viewfinder = self._set_up_viewfinder().result()
+        viewfinder.set_data(self._mmc.getImage().copy())
+        # viewfinder.set_current_index({})
 
     # -- LIVE VIEWER -- #
 
     def _start_live_viewer(self):
-        # Close old live viewer
-        if self.live_viewer:
-            self.live_viewer.close()
-            self.live_viewer = None
-
-        # Start new live viewer
-        w = self._mmc.getProperty("Camera", "OnCameraCCDXSize")
-        h = self._mmc.getProperty("Camera", "OnCameraCCDYSize")
-        shape = (int(w), int(h))
-        self.ts_array = ts.open(
-            {"driver": "zarr", "kvstore": {"driver": "memory"}},
-            create=True,
-            shape=shape,
-            dtype=self._data_type(),
-        ).result()
-        self.live_viewer = NDViewer(self.ts_array)
-        self.live_viewer.show()
+        viewfinder = self._set_up_viewfinder().result()
+        viewfinder.live_view = True
 
         # Start timer to update live viewer
         interval = int(self._mmc.getExposure())
@@ -307,24 +372,20 @@ class APP(QMainWindow):
 
     def _stop_live_viewer(self):
         # Pause live viewer, but leave it open.
-        if self.live_viewer:
+        if self.viewfinder.live_view:
+            self.viewfinder.live_view = False
             self.killTimer(self._live_timer_id)
             self._live_timer_id = None
 
+    @ensure_main_thread  # type: ignore [misc]
     def _update_viewer(self, data: np.ndarray | None = None) -> None:
         """Update viewer with the latest image from the circular buffer."""
         if data is None:
             if self._mmc.getRemainingImageCount() == 0:
                 return
             try:
-                # TODO - is there any way to read the bytes directly into this buffer?
-                # TODO Does it help us to do the write asyncronously, and just call
-                # setIndex later?
-                self.ts_array[:] = self._mmc.getLastImage()
-                # This call is important, telling the StackViewer to redraw the current
-                # data buffer.
-                if self.live_viewer:
-                    self.live_viewer.set_current_index({})
+                if self.viewfinder:
+                    self.viewfinder.set_data(self._mmc.getLastImage().copy())
             except (RuntimeError, IndexError):
                 # circular buffer empty
                 return
@@ -336,12 +397,14 @@ class APP(QMainWindow):
         # Handle the timer event by updating the viewer (on gui thread)
         self._update_viewer()
 
+    @ensure_main_thread  # type: ignore [misc]
     def _on_mda_frame(self, image: np.ndarray, event: MDAEvent) -> None:
         """Called on the `frameReady` event from the core."""
         self.mda_data.frameReady(image, event, {})
-        if not hasattr(self.mda_viewer, "_data_wrapper"):
-            self.mda_viewer.set_data(self.mda_data.store)
-        self.mda_viewer.set_current_index(event.index)
+        current_mda = cast(NDViewer, self.current_mda)
+        if not hasattr(current_mda, "_data_wrapper"):
+            current_mda.set_data(self.mda_data.store)
+        current_mda.set_current_index(event.index)
 
     @ensure_main_thread  # type: ignore [misc]
     def _on_mda_started(self, sequence: MDASequence) -> None:
@@ -357,25 +420,13 @@ class APP(QMainWindow):
                 "dtype": "uint16"  # TODO
             },
         )
-        self.mda_viewer = NDViewer()
-        self.mda_viewer.show()
+        self.current_mda = NDViewer()
+        self.current_mda.show()
 
     def _on_mda_finished(self, sequence: MDASequence) -> None:
-        # TODO consider necessary cleanup steps
-        pass
-
-    # -- HELPERS -- #
-
-    def _data_type(self):
-        px_type = self._mmc.getProperty("Camera", "PixelType")
-        if px_type == "8bit":
-            return ts.uint8
-        elif px_type == "16bit":
-            return ts.uint16
-        elif px_type == "32bit":
-            return ts.uint32
-        else:
-            raise Exception(f"Unsupported Pixel Type: {px_type}")
+        # Retain references to old MDA viewer
+        if self.current_mda is not None:
+            self.mdas.append(self.current_mda)
 
 
 def launch():
