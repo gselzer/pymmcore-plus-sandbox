@@ -1,3 +1,5 @@
+import tensorstore as ts
+from pymmcore_plus import CMMCorePlus
 from qtpy.QtGui import QFontMetrics, QGuiApplication
 from qtpy.QtWidgets import QDialog, QDialogButtonBox, QGridLayout, QLabel, QTextEdit
 
@@ -36,3 +38,15 @@ class ErrorMessageBox(QDialog):
         btn_box.accepted.connect(self.accept)
         self._layout.addWidget(btn_box, 2, 0, 1, self._layout.columnCount())
         self.setLayout(self._layout)
+
+
+def _data_type(mmc: CMMCorePlus):
+    px_type = mmc.getBytesPerPixel()
+    if px_type == 1:
+        return ts.uint8
+    elif px_type == 2:
+        return ts.uint16
+    elif px_type == 4:
+        return ts.uint32
+    else:
+        raise Exception(f"Unsupported Pixel Type: {px_type}")

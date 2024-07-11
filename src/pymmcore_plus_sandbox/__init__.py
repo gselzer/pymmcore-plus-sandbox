@@ -37,7 +37,7 @@ from useq import MDAEvent, MDASequence
 
 from pymmcore_plus_sandbox._mda_button_widget import MDAButton
 from pymmcore_plus_sandbox._stage_widget import StageButton
-from pymmcore_plus_sandbox._utils import ErrorMessageBox
+from pymmcore_plus_sandbox._utils import ErrorMessageBox, _data_type
 
 if TYPE_CHECKING:
     from typing import Any, Hashable, Mapping
@@ -198,7 +198,7 @@ class Viewfinder(NDViewer):
                 {"driver": "zarr", "kvstore": {"driver": "memory"}},
                 create=True,
                 shape=self.ts_shape,
-                dtype=self._data_type(),
+                dtype=_data_type(self._mmc),
             ).result()
             super().set_data(self.ts_array)
 
@@ -217,17 +217,6 @@ class Viewfinder(NDViewer):
         self.set_current_index(initial_index)
 
     # -- HELPERS -- #
-
-    def _data_type(self):
-        px_type = self._mmc.getBytesPerPixel()
-        if px_type == 1:
-            return ts.uint8
-        elif px_type == 2:
-            return ts.uint16
-        elif px_type == 4:
-            return ts.uint32
-        else:
-            raise Exception(f"Unsupported Pixel Type: {px_type}")
 
 
 class APP(QMainWindow):
@@ -435,9 +424,7 @@ class APP(QMainWindow):
         self.mda_data = TensorStoreHandler(
             driver="zarr",
             kvstore={"driver": "memory"},
-            spec={
-                "dtype": "uint16"  # TODO
-            },
+            spec={"dtype": _data_type(self._mmc)},
         )
         self.current_mda = NDViewer()
         self.current_mda.show()
