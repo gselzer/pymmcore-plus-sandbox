@@ -39,7 +39,7 @@ dependencies = [
 # extras
 # https://peps.python.org/pep-0621/#dependencies-optional-dependencies
 [project.optional-dependencies]
-dev = ["ipython", "mypy", "pre-commit", "ruff"]
+dev = ["ipython", "mypy", "pre-commit", "pyinstaller", "ruff"]
 
 # NB gui-scripts is chosen for 
 [project.gui-scripts]
