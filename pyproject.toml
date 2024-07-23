@@ -26,11 +26,14 @@ classifiers = [
 requires-python = ">=3.8"
 dependencies = [
     "cmap",
+    "IPython",
+    "ipykernel",
     "ndv@git+https://github.com/pyapp-kit/ndv.git@b79241c146bcbbb8160925f8cafbe8734ff75cef",
     "numpy<2",
     "PyQt6",
     "pymmcore-plus",
     "pymmcore-widgets",
+    "qtconsole",
     "vispy",
     "useq-schema",
     "zarr",
