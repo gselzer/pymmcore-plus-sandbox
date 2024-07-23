@@ -18,7 +18,7 @@ from pymmcore_widgets import (
     SnapButton,
 )
 from qtpy import QtCore
-from qtpy.QtGui import QAction
+from qtpy.QtGui import QAction, QCloseEvent
 from qtpy.QtWidgets import (
     QApplication,
     QDockWidget,
@@ -218,6 +218,10 @@ class Viewfinder(NDViewer):
 
     # -- HELPERS -- #
 
+    def closeEvent(self, event: QCloseEvent) -> None:
+        self._mmc.stopSequenceAcquisition()
+        super().closeEvent(event)
+
 
 class APP(QMainWindow):
     """Create a QToolBar for the Main Window."""
@@ -395,7 +399,7 @@ class APP(QMainWindow):
             interval, QtCore.Qt.TimerType.PreciseTimer
         )
 
-    def _stop_live_viewer(self):
+    def _stop_live_viewer(self, cameraLabel: str) -> None:
         # Pause live viewer, but leave it open.
         if self.viewfinder.live_view:
             self.viewfinder.live_view = False
