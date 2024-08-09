@@ -12,7 +12,9 @@ class ErrorMessageBox(QDialog):
         self.setWindowTitle("Error")
         self._layout = QGridLayout()
         # Write the title to a Label
-        self._layout.addWidget(QLabel(title, self), 0, 0, 1, self._layout.columnCount())
+        lbl = QLabel(title, self)
+        lbl.setOpenExternalLinks(True)
+        self._layout.addWidget(lbl, 0, 0, 1, self._layout.columnCount())
 
         # Write the error message to a TextEdit
         msg_edit = QTextEdit(self)

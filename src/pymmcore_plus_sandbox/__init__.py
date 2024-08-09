@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import traceback as tb
 from typing import TYPE_CHECKING, cast
 
 import numpy as np
@@ -228,6 +229,7 @@ class APP(QMainWindow):
 
     def __init__(self, mmc: CMMCorePlus | None = None) -> None:
         super().__init__()
+        sys.excepthook = self._on_error
         self._mmc = CMMCorePlus.instance() if mmc is None else mmc
         self.setWindowTitle("PyMMCore Plus Sandbox")
         self.viewfinder = Viewfinder(self._mmc)
@@ -266,6 +268,18 @@ class APP(QMainWindow):
         self._mmc.mda.events.frameReady.connect(self._on_mda_frame)
         self._mmc.mda.events.sequenceStarted.connect(self._on_mda_started)
         self._mmc.mda.events.sequenceFinished.connect(self._on_mda_finished)
+
+    def _on_error(self, type, value, traceback):
+        msg = "".join(tb.format_exception(value))
+        box = ErrorMessageBox(
+            "Operation raised the following Exception. Please post this output "
+            "and what you did to get it "
+            "<a href=https://github.com/gselzer/pymmcore-plus-sandbox/issues/new>here</a>",
+            msg,
+        )
+        box.setWindowTitle("ERROR")
+        box.raise_()
+        box.exec()
 
     def _create_menus(self) -> None:
         if (bar := self.menuBar()) is None:
