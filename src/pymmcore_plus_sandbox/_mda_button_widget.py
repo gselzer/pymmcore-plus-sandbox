@@ -55,6 +55,12 @@ class MDAButton(QPushButton):
         )
 
         self._mmc = mmcore or CMMCorePlus.instance()
+        self._wdg = MDAWidget(parent=None, mmcore=self._mmc)
+
+        # Ensure existing sequences are cancelled before running new ones
+        self._wdg.control_btns.run_btn.clicked.connect(
+            lambda _: self._mmc.stopSequenceAcquisition()
+        )
 
         self._mmc.events.systemConfigurationLoaded.connect(self._on_system_cfg_loaded)
         self._on_system_cfg_loaded()
@@ -73,8 +79,8 @@ class MDAButton(QPushButton):
         self.clicked.connect(self.launch_mda)
 
     def launch_mda(self) -> None:
-        self._mda = MDAWidget(parent=None, mmcore=self._mmc)
-        self._mda.show()
+        self._wdg.show()
+        self._wdg.raise_()
 
     def _on_system_cfg_loaded(self) -> None:
         self.setEnabled(bool(self._mmc.getCameraDevice()))
