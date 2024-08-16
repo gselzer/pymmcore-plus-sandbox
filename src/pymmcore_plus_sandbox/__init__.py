@@ -38,6 +38,7 @@ from useq import MDAEvent, MDASequence
 
 from pymmcore_plus_sandbox._console_widget import QtConsole
 from pymmcore_plus_sandbox._mda_button_widget import MDAButton
+from pymmcore_plus_sandbox._settings import DefaultConfigFile, Settings
 from pymmcore_plus_sandbox._stage_widget import StageButton
 from pymmcore_plus_sandbox._utils import ErrorMessageBox, _data_type
 
@@ -136,6 +137,7 @@ class ShuttersToolBar(QToolBar):
         self.shutter_tab.setLayout(self.snap_live_tab_layout)
 
         self.addWidget(self.shutter_tab)
+        self._refresh_toolbar()
 
     def _refresh_toolbar(self) -> None:
         """Called to refresh the tab with current shutters."""
@@ -145,13 +147,17 @@ class ShuttersToolBar(QToolBar):
 
         # Add new shutters
         shutter_dev_list = list(self.mmc.getLoadedDevicesOfType(DeviceType.Shutter))
-        for idx, shutter_dev in enumerate(shutter_dev_list):
-            # bool to display the autoshutter checkbox only with the last shutter
-            autoshutter = bool(idx >= len(shutter_dev_list) - 1)
-            shutter = ShuttersWidget(shutter_dev, autoshutter=autoshutter)
-            shutter.button_text_open = shutter_dev
-            shutter.button_text_closed = shutter_dev
-            self.btn_wdg_layout.addWidget(shutter)
+        if len(shutter_dev_list) == 0:
+            self.hide()
+        else:
+            self.show()
+            for idx, shutter_dev in enumerate(shutter_dev_list):
+                # bool to display the autoshutter checkbox only with the last shutter
+                autoshutter = bool(idx >= len(shutter_dev_list) - 1)
+                shutter = ShuttersWidget(shutter_dev, autoshutter=autoshutter)
+                shutter.button_text_open = shutter_dev
+                shutter.button_text_closed = shutter_dev
+                self.btn_wdg_layout.addWidget(shutter)
 
 
 class CentralWidget(QWidget):
@@ -231,6 +237,9 @@ class APP(QMainWindow):
         super().__init__()
         sys.excepthook = self._on_error
         self._mmc = CMMCorePlus.instance() if mmc is None else mmc
+
+        self._settings = Settings(settings=[DefaultConfigFile(self._mmc)])
+
         self.setWindowTitle("PyMMCore Plus Sandbox")
         self.viewfinder = Viewfinder(self._mmc)
         self.current_mda: NDViewer | None = None
@@ -284,6 +293,17 @@ class APP(QMainWindow):
     def _create_menus(self) -> None:
         if (bar := self.menuBar()) is None:
             return
+        self.fileMenu = cast(QMenu, bar.addMenu("File"))
+        self.settingAction = QAction("Settings", self)
+        self.settingAction.triggered.connect(self._settings.configure)
+
+        self.quitAction = QAction("Quit", self)
+        self.quitAction.triggered.connect(self.close)
+
+        self.fileMenu.addAction(self.settingAction)
+        self.fileMenu.addSeparator()
+        self.fileMenu.addAction(self.quitAction)
+
         self.deviceMenu = cast(QMenu, bar.addMenu("Device"))
 
         self.property_browser: PropertyBrowser | None = None
@@ -472,12 +492,11 @@ class APP(QMainWindow):
 
 def launch():
     """Launches the GUI and blocks."""
+    CMMCorePlus.instance()
+
     qapp = QApplication(sys.argv)
     w = APP()
     w.show()
-
-    mmcore = CMMCorePlus.instance()
-    mmcore.loadSystemConfiguration("./MMConfig_demo.cfg")
 
     qapp.exec()
 
