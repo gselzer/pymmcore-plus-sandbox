@@ -29,3 +29,6 @@ wheels/
 
 # IDE settings
 .vscode/
+
+# GUI Settings file
+settings.yml

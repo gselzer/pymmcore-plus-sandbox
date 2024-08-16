@@ -20,4 +20,5 @@ repos:
           - pymmcore >=10.7.0.71.0
           - useq-schema >= 0.4.7
           - psygnal
+          - types-PyYAML
           - typer
