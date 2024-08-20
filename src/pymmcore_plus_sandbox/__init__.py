@@ -413,6 +413,7 @@ class APP(QMainWindow):
 
     # -- SNAP VIEWER -- #
 
+    @ensure_main_thread  # type: ignore [misc]
     def _handle_snap(self):
         if self._mmc.mda.is_running():
             # This signal is emitted during MDAs as well - we want to ignore those.
@@ -423,6 +424,7 @@ class APP(QMainWindow):
 
     # -- LIVE VIEWER -- #
 
+    @ensure_main_thread  # type: ignore [misc]
     def _start_live_viewer(self):
         viewfinder = self._set_up_viewfinder()
         viewfinder.live_view = True
@@ -440,7 +442,6 @@ class APP(QMainWindow):
             self.killTimer(self._live_timer_id)
             self._live_timer_id = None
 
-    @ensure_main_thread  # type: ignore [misc]
     def _update_viewer(self, data: np.ndarray | None = None) -> None:
         """Update viewer with the latest image from the circular buffer."""
         if data is None:
@@ -492,7 +493,6 @@ class APP(QMainWindow):
 
 def launch():
     """Launches the GUI and blocks."""
-    CMMCorePlus.instance()
 
     qapp = QApplication(sys.argv)
     w = APP()
