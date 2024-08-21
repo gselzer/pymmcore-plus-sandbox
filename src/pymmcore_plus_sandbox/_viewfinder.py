@@ -1,5 +1,5 @@
 from os import path
-from typing import TYPE_CHECKING
+from typing import Any, Hashable, Mapping
 
 import tensorstore as ts
 import tifffile
@@ -13,9 +13,6 @@ from qtpy.QtWidgets import QFileDialog, QPushButton, QSizePolicy, QWidget
 from superqt.fonticon import icon
 
 from pymmcore_plus_sandbox._utils import _data_type
-
-if TYPE_CHECKING:
-    from typing import Any, Hashable, Mapping
 
 
 class SaveButton(QPushButton):
@@ -49,10 +46,6 @@ class SaveButton(QPushButton):
 
         self._create_button()
 
-        self.setEnabled(False)
-        if len(self._mmc.getLoadedDevices()) > 1:
-            self.setEnabled(True)
-
     def _create_button(self) -> None:
         self.setText("Save")
         self.setIcon(icon(MDI6.content_save, color=(0, 255, 0)))
@@ -73,6 +66,7 @@ class SaveButton(QPushButton):
         (p, extension) = path.splitext(file)
         if extension == ".tif":
             data = self._view.data_wrapper.isel({})
+            # TODO: Save metadata?
             tifffile.imwrite(file, data=data)
         # TODO: Zarr seems like it would be easily supported through
         # self._view.data_wrapper.save_as_zarr, but it is not implemented
@@ -120,7 +114,6 @@ class Viewfinder(NDViewer):
         *,
         initial_index: Mapping[Hashable, int | slice] | None = {},
     ) -> None:
-        # def set_data(self, data, *, initial_index=None) -> None:
         if initial_index is None:
             initial_index = {}
         self.update_datastore()
