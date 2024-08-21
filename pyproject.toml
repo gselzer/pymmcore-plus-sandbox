@@ -36,6 +36,7 @@ dependencies = [
     "pymmcore-widgets@git+https://github.com/pymmcore-plus/pymmcore-widgets.git@920ec4aed705b9975b5a994734e270aee63a4dae",
     "pyyaml",
     "qtconsole",
+    "tifffile",
     "vispy",
     "useq-schema",
     "zarr",

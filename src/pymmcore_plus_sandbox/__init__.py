@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import sys
 import traceback as tb
-from typing import TYPE_CHECKING, cast
+from typing import cast
 
 import numpy as np
-import tensorstore as ts
-from ndv import DataWrapper, NDViewer
+from ndv import NDViewer
 from pymmcore_plus import CMMCorePlus, DeviceType
 from pymmcore_plus.mda.handlers import TensorStoreHandler
 from pymmcore_widgets import (
@@ -19,7 +18,7 @@ from pymmcore_widgets import (
     SnapButton,
 )
 from qtpy import QtCore
-from qtpy.QtGui import QAction, QCloseEvent
+from qtpy.QtGui import QAction
 from qtpy.QtWidgets import (
     QApplication,
     QDockWidget,
@@ -41,9 +40,7 @@ from pymmcore_plus_sandbox._mda_button_widget import MDAButton
 from pymmcore_plus_sandbox._settings import DefaultConfigFile, Settings
 from pymmcore_plus_sandbox._stage_widget import StageButton
 from pymmcore_plus_sandbox._utils import ErrorMessageBox, _data_type
-
-if TYPE_CHECKING:
-    from typing import Any, Hashable, Mapping
+from pymmcore_plus_sandbox._viewfinder import Viewfinder
 
 
 class SnapLiveToolBar(QToolBar):
@@ -173,61 +170,6 @@ class CentralWidget(QWidget):
         self._layout.addWidget(centerWidget)
 
         self.setLayout(self._layout)
-
-
-class Viewfinder(NDViewer):
-    """An NDViewer subclass designed for expedient Snap&Live views."""
-
-    def __init__(self, mmc: CMMCorePlus | None = None) -> None:
-        super().__init__()
-        self.setWindowTitle("Viewfinder")
-        self.live_view: bool = False
-        self._mmc = mmc if mmc is not None else CMMCorePlus.instance()
-
-        self._btns.insertWidget(0, SnapButton(mmcore=self._mmc))
-        self._btns.insertWidget(1, LiveButton(mmcore=self._mmc))
-
-        # Create initial buffer
-        self.ts_array = None
-        self.ts_shape = (0, 0)
-        self.bytes_per_pixel = 0
-
-    def update_datastore(self):
-        if (
-            self.ts_array is None
-            or self.ts_shape[0] != self._mmc.getImageHeight()
-            or self.ts_shape[1] != self._mmc.getImageWidth()
-            or self.bytes_per_pixel != self._mmc.getBytesPerPixel()
-        ):
-            self.ts_shape = (self._mmc.getImageHeight(), self._mmc.getImageWidth())
-            self.bytes_per_pixel = self._mmc.getBytesPerPixel()
-            self.ts_array = ts.open(
-                {"driver": "zarr", "kvstore": {"driver": "memory"}},
-                create=True,
-                shape=self.ts_shape,
-                dtype=_data_type(self._mmc),
-            ).result()
-            super().set_data(self.ts_array)
-
-    def set_data(
-        self,
-        data: DataWrapper[Any] | Any,
-        *,
-        initial_index: Mapping[Hashable, int | slice] | None = {},
-    ) -> None:
-        # def set_data(self, data, *, initial_index=None) -> None:
-        if initial_index is None:
-            initial_index = {}
-        self.update_datastore()
-        if self.ts_array:
-            self.ts_array[:] = data
-        self.set_current_index(initial_index)
-
-    # -- HELPERS -- #
-
-    def closeEvent(self, event: QCloseEvent) -> None:
-        self._mmc.stopSequenceAcquisition()
-        super().closeEvent(event)
 
 
 class APP(QMainWindow):
