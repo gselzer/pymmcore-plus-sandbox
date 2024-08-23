@@ -40,7 +40,7 @@ from pymmcore_plus_sandbox._mda_button_widget import MDAButton
 from pymmcore_plus_sandbox._settings import DefaultConfigFile, Settings
 from pymmcore_plus_sandbox._stage_widget import StageButton
 from pymmcore_plus_sandbox._utils import ErrorMessageBox, _data_type
-from pymmcore_plus_sandbox._viewfinder import Viewfinder
+from pymmcore_plus_sandbox._viewfinder import View, Viewfinder
 
 
 class SnapLiveToolBar(QToolBar):
@@ -361,8 +361,7 @@ class APP(QMainWindow):
             # This signal is emitted during MDAs as well - we want to ignore those.
             return
         viewfinder = self._set_up_viewfinder()
-        viewfinder.set_data(self._mmc.getImage().copy())
-        # viewfinder.set_current_index({})
+        viewfinder.set_data(self._mmc.getImage())
 
     # -- LIVE VIEWER -- #
 
@@ -391,7 +390,7 @@ class APP(QMainWindow):
                 return
             try:
                 if self.viewfinder:
-                    self.viewfinder.set_data(self._mmc.getLastImage().copy())
+                    self.viewfinder.set_data(self._mmc.getLastImage())
             except (RuntimeError, IndexError):
                 # circular buffer empty
                 return
@@ -424,7 +423,7 @@ class APP(QMainWindow):
             kvstore={"driver": "memory"},
             spec={"dtype": _data_type(self._mmc)},
         )
-        self.current_mda = NDViewer()
+        self.current_mda = View()
         self.current_mda.show()
         self.mdas.append(self.current_mda)
 
