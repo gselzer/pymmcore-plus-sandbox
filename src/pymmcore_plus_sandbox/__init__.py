@@ -395,7 +395,8 @@ class APP(QMainWindow):
                 return
             try:
                 if self.viewfinder:
-                    self.viewfinder.set_data(self._mmc.getLastImage())
+                    img = self._mmc.getLastImage()
+                    self.viewfinder.set_data(self._mmc.fixImage(img))
             except (RuntimeError, IndexError):
                 # circular buffer empty
                 return

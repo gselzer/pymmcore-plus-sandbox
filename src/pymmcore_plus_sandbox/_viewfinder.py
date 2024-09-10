@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 from os import path
-from typing import TYPE_CHECKING, Any, Hashable, Iterable, Mapping
+from typing import TYPE_CHECKING, Hashable, Iterable, Mapping
 
-import tensorstore as ts
 import tifffile
 from fonticon_mdi6 import MDI6
-from ndv import DataWrapper, NDViewer
+from ndv import NDViewer
 from pymmcore_plus import CMMCorePlus
 from pymmcore_widgets import LiveButton, SnapButton
 from qtpy.QtCore import QSize
@@ -14,8 +13,6 @@ from qtpy.QtGui import QCloseEvent
 from qtpy.QtWidgets import QFileDialog, QPushButton, QSizePolicy, QWidget
 from superqt import ensure_main_thread
 from superqt.fonticon import icon
-
-from pymmcore_plus_sandbox._utils import _data_type
 
 if TYPE_CHECKING:
     from concurrent.futures import Future
@@ -165,44 +162,33 @@ class Viewfinder(View):
         self._btns.insertWidget(1, LiveButton(mmcore=self._mmc))
         self._btns.insertWidget(2, ExportButton(mmcore=self._mmc, viewfinder=self))
 
-        # Create initial buffer
-        self.ts_array = None
-        self.ts_shape = (0, 0)
-        self.bytes_per_pixel = 0
+        # Initial buffer
+        # NB will immediately be overwritten once data sent
+        self._buffer: np.ndarray = np.ndarray(())
 
-    # # Begin TODO: Remove once https://github.com/pyapp-kit/ndv/issues/39 solved
-
-    def _update_datastore(self) -> Any:
-        if (
-            self.ts_array is None
-            or self.ts_shape[0] != self._mmc.getImageHeight()
-            or self.ts_shape[1] != self._mmc.getImageWidth()
-            or self.bytes_per_pixel != self._mmc.getBytesPerPixel()
-        ):
-            self.ts_shape = (self._mmc.getImageHeight(), self._mmc.getImageWidth())
-            self.bytes_per_pixel = self._mmc.getBytesPerPixel()
-            self.ts_array = ts.open(
-                {"driver": "zarr", "kvstore": {"driver": "memory"}},
-                create=True,
-                shape=self.ts_shape,
-                dtype=_data_type(self._mmc),
-            ).result()
-            super().set_data(self.ts_array)
-        return self.ts_array
+    # Begin TODO: Remove once https://github.com/pyapp-kit/ndv/issues/39 solved
 
     def set_data(
         self,
-        data: DataWrapper[Any] | Any,
+        data: np.ndarray,
         *,
         initial_index: Mapping[Hashable, int | slice] | None = None,
     ) -> None:
         if initial_index is None:
             initial_index = {}
-        array = self._update_datastore()
-        array[:] = data
+        if (
+            self._buffer is None
+            or self._buffer.shape != data.shape
+            or self._buffer.dtype != data.dtype
+        ):
+            self._buffer = data
+            super().set_data(self._buffer)
+            super().set_channel_mode("rgb" if data.ndim == 3 else "mono")
+        else:
+            self._buffer[:] = data
         self.set_current_index(initial_index)
 
-    # # End TODO: Remove once https://github.com/pyapp-kit/ndv/issues/39 solved
+    # End TODO: Remove once https://github.com/pyapp-kit/ndv/issues/39 solved
 
     # -- HELPERS -- #
 
