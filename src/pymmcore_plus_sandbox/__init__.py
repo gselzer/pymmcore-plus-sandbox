@@ -305,6 +305,11 @@ class APP(QMainWindow):
     def _exec_property_wizard(self) -> None:
         wizard = ConfigWizard(parent=None, core=self._mmc)
         wizard.exec()
+        # HACK: The wizard unloads system config on rejection, so we reload it here.
+        if wizard.rejected:
+            last_config_file = self._mmc.systemConfigurationFile()
+            if last_config_file is not None:
+                self._mmc.loadSystemConfiguration(last_config_file)
 
     def _load_hw_config(self) -> None:
         """Open file dialog to select a config file."""
