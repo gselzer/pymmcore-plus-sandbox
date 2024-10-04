@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 import traceback as tb
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 from ndv import NDViewer
@@ -33,7 +33,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 from superqt.utils import ensure_main_thread
-from useq import MDAEvent, MDASequence
+from useq import GridRowsColumns, MDAEvent, MDASequence
 
 from pymmcore_plus_sandbox._console_widget import QtConsole
 from pymmcore_plus_sandbox._mda_button_widget import MDAButton
@@ -41,6 +41,16 @@ from pymmcore_plus_sandbox._settings import DefaultConfigFile, Settings
 from pymmcore_plus_sandbox._stage_widget import StageButton
 from pymmcore_plus_sandbox._utils import ErrorMessageBox, _data_type
 from pymmcore_plus_sandbox._viewfinder import View, Viewfinder
+
+if TYPE_CHECKING:
+    from os import PathLike
+    from typing import Literal, Mapping, TypeAlias
+
+    import numpy as np
+    import tensorstore as ts
+
+    TsDriver: TypeAlias = Literal["zarr", "zarr3", "n5", "neuroglancer_precomputed"]
+    EventKey: TypeAlias = frozenset[tuple[str, int]]
 
 
 class SnapLiveToolBar(QToolBar):
@@ -409,7 +419,10 @@ class APP(QMainWindow):
         current_mda = cast(NDViewer, self.current_mda)
         if not hasattr(current_mda, "_data_wrapper"):
             current_mda.set_data(self.mda_data.store)
-        current_mda.set_current_index(event.index)
+        idx = dict(event.index)
+        if "g" in idx:
+            idx.pop("g")
+        current_mda.set_current_index(idx)
 
     @ensure_main_thread  # type: ignore [misc]
     def _on_mda_started(self, sequence: MDASequence) -> None:
@@ -418,7 +431,8 @@ class APP(QMainWindow):
         # TODO can we discern whether the sequence is being written to file?
         # If so, should we avoid viewing it?
         # TODO consider whether/how to expose other datastores
-        self.mda_data = TensorStoreHandler(
+        self.mda_data = GridPlanTensorStoreHandler(
+            sequence,
             driver="zarr",
             kvstore={"driver": "memory"},
             spec={"dtype": _data_type(self._mmc)},
@@ -430,6 +444,91 @@ class APP(QMainWindow):
     def _on_mda_finished(self, sequence: MDASequence) -> None:
         # Nothing to do...yet
         pass
+
+
+class GridPlanTensorStoreHandler(TensorStoreHandler):
+    def __init__(
+        self,
+        sequence: MDASequence,
+        *,
+        driver: TsDriver = "zarr",
+        kvstore: str | dict | None = "memory://",
+        path: str | PathLike | None = None,
+        delete_existing: bool = False,
+        spec: Mapping | None = None,
+    ) -> None:
+        super().__init__(
+            driver=driver,
+            kvstore=kvstore,
+            path=path,
+            delete_existing=delete_existing,
+            spec=spec,
+        )
+        self._sequence = sequence
+        self._evaluate_grid_plan()
+
+    def get_shape_chunks_labels(
+        self, frame_shape: tuple[int, ...], seq: MDASequence | None
+    ) -> tuple[tuple[int, ...], tuple[int, ...], tuple[str, ...]]:
+        shape, chunks, labels = super().get_shape_chunks_labels(frame_shape, seq)
+
+        if "g" in labels:
+            g_idx = labels.index("g")
+            x_idx = labels.index("x")
+            y_idx = labels.index("y")
+            # TODO: Consider overlap
+            chunks = chunks[:g_idx] + chunks[g_idx + 1 :]
+
+            shape = list(shape)
+            shape[x_idx] = self._width
+            shape[y_idx] = self._height
+            shape.pop(g_idx)
+            shape = tuple(shape)
+
+            labels = labels[:g_idx] + labels[g_idx + 1 :]
+
+        return shape, chunks, labels
+
+    def _event_index_to_store_index(
+        self, index: Mapping[str, int | slice]
+    ) -> ts.DimExpression:
+        if self._nd_storage:
+            keys, values = [list(a) for a in zip(*index.items())]
+            if "g" in keys:
+                g_idx = keys.index("g")
+                x = int(self._idx_to_pos[values[g_idx]].x - self._min[0])
+                y = int(self._idx_to_pos[values[g_idx]].y - self._min[1])
+
+                # TODO: Consider overlap
+                keys = keys[:g_idx] + keys[g_idx + 1 :] + ["x", "y"]
+
+                values = (
+                    values[:g_idx]
+                    + values[g_idx + 1 :]
+                    + [slice(x, x + self._fov[0]), slice(y, y + self._fov[1])]
+                )
+
+            # NB: There's some issue values being a list - not sure why.
+            return self._ts.d[*keys][*values]
+        raise NotImplementedError()
+
+    def _evaluate_grid_plan(self):
+        gp = self._sequence.grid_plan
+        if isinstance(gp, GridRowsColumns):
+            w = (gp.fov_width * gp.rows) - (gp.overlap[0] * (gp.rows - 1))
+            h = (gp.fov_width * gp.rows) - (gp.overlap[0] * (gp.rows - 1))
+            self._width = int(w)
+            self._height = int(h)
+            self._fov = [int(gp.fov_width), int(gp.fov_height)]
+            self._min = [0.0, 0.0]
+            self._idx_to_pos = list(gp.iter_grid_positions())
+            for pos in self._idx_to_pos:
+                self._min[0] = min(self._min[0], pos.x)
+                self._min[1] = min(self._min[1], pos.y)
+            self._r = gp.rows
+            self._c = gp.columns
+        else:
+            raise ValueError("Unrecognized GridPlan:")
 
 
 def launch():
