@@ -33,7 +33,7 @@ dependencies = [
     "numpy<2",
     "PyQt6",
     "pymmcore-plus",
-    "pymmcore-widgets@git+https://github.com/pymmcore-plus/pymmcore-widgets.git@3c63ba525ec4fe4a07076e978656bb055d129d70",
+    "pymmcore-widgets == 0.8.0",
     "pyyaml",
     "qtconsole",
     "tifffile",
